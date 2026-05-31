@@ -39,7 +39,7 @@ function SitesPage() {
 
   const addSite = useMutation({
     mutationFn: async (input: { name: string; client: string; location: string; contract_type: string }) => {
-      const { error } = await supabase.from("sites").insert({ ...input, owner_id: user!.id });
+      const { error } = await supabase.from("sites").insert({ ...input, contract_type: input.contract_type as any, owner_id: user!.id });
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["sites"] }); setOpen(false); toast.success("Site created"); },
