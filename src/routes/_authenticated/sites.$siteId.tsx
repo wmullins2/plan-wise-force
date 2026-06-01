@@ -114,24 +114,51 @@ function SetupTab({ site, canWrite }: { site: Site; canWrite: boolean }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  const setPattern = (p: string) => {
-    const defaults = OPERATING_PATTERN_DEFAULTS[p as keyof typeof OPERATING_PATTERN_DEFAULTS];
-    setS(prev => ({
-      ...prev,
-      operating_pattern: p as Site["operating_pattern"],
-      hours_per_shift: defaults?.hoursPerShift ?? prev.hours_per_shift,
-      concurrent_shifts: defaults?.concurrentShifts ?? prev.concurrent_shifts,
-      work_days_per_year: defaults?.workDays ?? prev.work_days_per_year,
-    }));
+  // --- Coverage-based shift recommendation ---
+  // Coverage inputs are kept in local UI state; the resulting pattern is written
+  // back to the existing site fields (operating_pattern, shift_model, hours_per_shift,
+  // concurrent_shifts, work_days_per_year) so the rest of the calc engine works unchanged.
+  const inferDefaults = () => {
+    if (s.operating_pattern === "24/7 continuous") return { start: "00:00", end: "00:00", days: "Mon-Sun" as CoverageDays };
+    if (s.operating_pattern === "24/5 Mon-Fri")    return { start: "00:00", end: "00:00", days: "Mon-Fri" as CoverageDays };
+    if (s.operating_pattern === "Mon-Sat 08-17")   return { start: "08:00", end: "17:00", days: "Mon-Sat" as CoverageDays };
+    if (s.operating_pattern === "Extended 07-19 Mon-Fri") return { start: "07:00", end: "19:00", days: "Mon-Fri" as CoverageDays };
+    return { start: "08:00", end: "17:00", days: "Mon-Fri" as CoverageDays };
   };
+  const init = inferDefaults();
+  const [coverStart, setCoverStart] = useState(init.start);
+  const [coverEnd, setCoverEnd]     = useState(init.end);
+  const [coverDays, setCoverDays]   = useState<CoverageDays>(init.days);
+  const [override, setOverride]     = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
 
-  const setShiftModel = (m: string) => {
+  const coverageHours = coverageHoursPerDay(coverStart, coverEnd);
+  const recommendation = useMemo(
+    () => recommendShiftPattern(coverageHours, coverDays, s.min_on_site),
+    [coverageHours, coverDays, s.min_on_site],
+  );
+
+  // Apply recommendation to site fields whenever it changes — unless user is overriding.
+  const applyRec = (r: ShiftRecommendation) => {
     setS(prev => ({
       ...prev,
-      shift_model: m as Site["shift_model"],
-      min_on_site: m === "Continental 4on4off 12h" ? Math.max(2, prev.min_on_site) : prev.min_on_site,
+      operating_pattern: r.operatingPattern,
+      shift_model: r.shiftModel,
+      hours_per_shift: r.hoursPerShift,
+      concurrent_shifts: r.simultaneousSlots,
+      work_days_per_year: r.workDaysPerYear,
     }));
   };
+  // Sync once whenever recommendation changes and not overriding
+  const lastApplied = useRef<string>("");
+  if (!override) {
+    const key = `${recommendation.operatingPattern}|${recommendation.shiftModel}|${recommendation.hoursPerShift}|${recommendation.simultaneousSlots}|${recommendation.workDaysPerYear}`;
+    if (lastApplied.current !== key) {
+      lastApplied.current = key;
+      // defer to avoid setState-in-render warning
+      queueMicrotask(() => applyRec(recommendation));
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -152,26 +179,93 @@ function SetupTab({ site, canWrite }: { site: Site; canWrite: boolean }) {
         </div>
       </Card>
 
+      {/* STEP 1 — Coverage */}
       <Card className="p-6 space-y-5">
-        <SectionTitle sub="Selecting a pattern auto-fills hours/shift, concurrent shifts and work days.">Operating pattern & shifts</SectionTitle>
-        <div className="grid md:grid-cols-2 gap-4">
-          <Field label="Operating pattern">
-            <Select value={s.operating_pattern} onValueChange={setPattern} disabled={!canWrite}>
+        <SectionTitle sub="Define when the site needs to be staffed. The system will recommend the most efficient shift pattern.">
+          Step 1 · Required coverage
+        </SectionTitle>
+        <div className="grid md:grid-cols-4 gap-4">
+          <Field label="Coverage start">
+            <Input type="time" className="font-mono" value={coverStart} onChange={e=>setCoverStart(e.target.value)} disabled={!canWrite}/>
+          </Field>
+          <Field label="Coverage end">
+            <Input type="time" className="font-mono" value={coverEnd} onChange={e=>setCoverEnd(e.target.value)} disabled={!canWrite}/>
+          </Field>
+          <Field label="Days of week">
+            <Select value={coverDays} onValueChange={v=>setCoverDays(v as CoverageDays)} disabled={!canWrite}>
               <SelectTrigger><SelectValue/></SelectTrigger>
-              <SelectContent>{OPERATING_PATTERNS.map(p=><SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+              <SelectContent>{COVERAGE_DAYS.map(d=><SelectItem key={d} value={d}>{d === "24h" ? "24 hours (any day)" : d}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
-          <Field label="Shift model">
-            <Select value={s.shift_model} onValueChange={setShiftModel} disabled={!canWrite}>
-              <SelectTrigger><SelectValue/></SelectTrigger>
-              <SelectContent>{SHIFT_MODELS.map(m=><SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-            </Select>
+          <Field label="Min engineers on site">
+            <Input type="number" className="font-mono" value={s.min_on_site} onChange={e=>setS({...s, min_on_site:+e.target.value})} disabled={!canWrite}/>
           </Field>
-          <Field label="Hours / shift"><Input type="number" step="0.5" className="font-mono" value={s.hours_per_shift} onChange={e=>setS({...s, hours_per_shift:+e.target.value})} disabled={!canWrite}/></Field>
-          <Field label="Concurrent shifts / day"><Input type="number" className="font-mono" value={s.concurrent_shifts} onChange={e=>setS({...s, concurrent_shifts:+e.target.value})} disabled={!canWrite}/></Field>
-          <Field label="Work days / year"><Input type="number" className="font-mono" value={s.work_days_per_year} onChange={e=>setS({...s, work_days_per_year:+e.target.value})} disabled={!canWrite}/></Field>
-          <Field label="Min engineers on site"><Input type="number" className="font-mono" value={s.min_on_site} onChange={e=>setS({...s, min_on_site:+e.target.value})} disabled={!canWrite}/></Field>
         </div>
+        <div className="text-xs text-muted-foreground">
+          Coverage window: <span className="font-mono text-foreground">{coverageHours.toFixed(1)}h/day</span>
+          {" · "}Tip: set start = end (e.g. 00:00 → 00:00) for 24-hour coverage.
+        </div>
+      </Card>
+
+      {/* STEP 2 — Recommendation */}
+      <Card className="p-6 space-y-4">
+        <SectionTitle sub="Calculated automatically from the coverage window above.">
+          Step 2 · Recommended shift pattern
+        </SectionTitle>
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-primary font-medium">Recommended</div>
+              <div className="text-xl font-semibold mt-1">{recommendation.patternName}</div>
+              <p className="text-sm text-muted-foreground mt-2 max-w-xl">{recommendation.reason}</p>
+            </div>
+            <Pill tone="primary">{override ? "Overridden" : "Active"}</Pill>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+            <Metric label="Shift length" value={`${recommendation.hoursPerShift}h`} />
+            <Metric label="Shifts / day"  value={String(recommendation.shiftsPerDay)} />
+            <Metric label="Work days / yr" value={String(recommendation.workDaysPerYear)} />
+            <Metric label="Simultaneous slots" value={String(recommendation.simultaneousSlots)} accent />
+          </div>
+        </div>
+      </Card>
+
+      {/* STEP 3 — Override */}
+      <Card className="p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <SectionTitle sub="Use the recommended pattern, or override it manually.">Step 3 · Override</SectionTitle>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Override recommended pattern</Label>
+            <Switch checked={override} onCheckedChange={(v)=>setOverride(!!v)} disabled={!canWrite}/>
+          </div>
+        </div>
+        {override && (
+          <div className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <Field label="Shift model">
+                <Select value={s.shift_model} onValueChange={(m)=>setS({...s, shift_model: m as Site["shift_model"]})} disabled={!canWrite}>
+                  <SelectTrigger><SelectValue/></SelectTrigger>
+                  <SelectContent>{SHIFT_MODELS.map(m=><SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+              <Field label="Hours / shift">
+                <Input type="number" step="0.5" className="font-mono" value={s.hours_per_shift}
+                  onChange={e=>setS({...s, hours_per_shift:+e.target.value})} disabled={!canWrite}/>
+              </Field>
+              <Field label="Concurrent shifts / day">
+                <Input type="number" className="font-mono" value={s.concurrent_shifts}
+                  onChange={e=>setS({...s, concurrent_shifts:+e.target.value})} disabled={!canWrite}/>
+              </Field>
+              <Field label="Work days / year">
+                <Input type="number" className="font-mono" value={s.work_days_per_year}
+                  onChange={e=>setS({...s, work_days_per_year:+e.target.value})} disabled={!canWrite}/>
+              </Field>
+            </div>
+            <Field label="Reason for override (optional)">
+              <Textarea value={overrideReason} onChange={e=>setOverrideReason(e.target.value)} rows={2} disabled={!canWrite}/>
+            </Field>
+          </div>
+        )}
       </Card>
 
       <Card className="p-6 space-y-5">
