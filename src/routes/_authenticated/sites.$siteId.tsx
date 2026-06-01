@@ -21,12 +21,12 @@ import {
   inHouseHoursPerYear, vendorHoursPerYear, totalFTE, headcountAt100, shiftSlots, isShiftTeam,
   availabilityRatio, disciplineBreakdown, tradeGroupRollup, sensitivityTable,
   statutorySplit, woTypeSplit, sfg20Comparison, taskHoursPerYear, coverAdjusted, fmt,
-  recommendShiftPattern, coverageHoursPerDay, minViableCrew, COVERAGE_DAYS,
+  recommendShiftPattern, coverageHoursPerDay, COVERAGE_DAYS,
   type Site, type PMTask, type Discipline, type WOType, type CoverageDays, type ShiftRecommendation,
 } from "@/lib/calc";
 import { PageHeader, Metric, SectionTitle, Pill } from "@/components/samp-ui";
 
-const OPERATING_PATTERNS = ["Mon-Fri 08-17","Mon-Sat 08-17","Extended 07-19 Mon-Fri","24/7 continuous","24/5 Mon-Fri","Custom"] as const;
+const SHIFT_MODELS = ["Day work","Continental 4on4off 12h","3-shift rotating 8h","2-shift early/late 8h","Custom"] as const;
 const SHIFT_MODELS = ["Day work","Continental 4on4off 12h","3-shift rotating 8h","2-shift early/late 8h","Custom"] as const;
 const CONTRACT_TYPES = ["TFM","Hard FM","Soft FM","Self-delivered"] as const;
 
