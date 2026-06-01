@@ -314,3 +314,148 @@ export const fmt = {
   fte: (v: number) => fmt.n(v, 2),
   gbp: (v: number) => "£" + fmt.n(v, 0),
 };
+
+/* ============= Coverage-based shift pattern recommendation ============= */
+export type CoverageDays = "Mon-Fri" | "Mon-Sat" | "Mon-Sun" | "24h";
+
+export const COVERAGE_DAYS: CoverageDays[] = ["Mon-Fri", "Mon-Sat", "Mon-Sun", "24h"];
+
+export const COVERAGE_DAY_DEFAULTS: Record<CoverageDays, { daysPerWeek: number; workDaysPerYear: number }> = {
+  "Mon-Fri": { daysPerWeek: 5, workDaysPerYear: 252 },
+  "Mon-Sat": { daysPerWeek: 6, workDaysPerYear: 300 },
+  "Mon-Sun": { daysPerWeek: 7, workDaysPerYear: 365 },
+  "24h":     { daysPerWeek: 7, workDaysPerYear: 365 },
+};
+
+export function coverageHoursPerDay(start: string, end: string): number {
+  // "HH:MM" → hours per day. start==end (or 00:00→00:00) means 24h.
+  const toMin = (s: string) => {
+    const [h, m] = s.split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  const a = toMin(start), b = toMin(end);
+  if (a === b) return 24;
+  const diff = b > a ? b - a : (24 * 60 - a) + b;
+  return diff / 60;
+}
+
+export type ShiftRecommendation = {
+  patternName: string;
+  shiftModel: ShiftModel;
+  operatingPattern: OperatingPattern;
+  hoursPerShift: number;
+  shiftsPerDay: number;          // concurrent / sequential slots covering the day
+  workDaysPerYear: number;
+  reason: string;
+  simultaneousSlots: number;     // how many slots must be staffed in parallel at any moment
+  minCrewToOperate: number;      // min people to run the pattern (per role) before absence
+  coverageHoursPerDay: number;
+  coverageDays: CoverageDays;
+};
+
+export function recommendShiftPattern(
+  coverageHoursDay: number,
+  days: CoverageDays,
+  minOnSite: number = 1,
+): ShiftRecommendation {
+  const h = Math.max(0, Math.min(24, coverageHoursDay));
+  const wd = COVERAGE_DAY_DEFAULTS[days].workDaysPerYear;
+
+  // 24/7 (or near-24 across 7 days) → Continental
+  if (h >= 23.5 && days === "Mon-Sun") {
+    return {
+      patternName: "Continental 4-on / 4-off",
+      shiftModel: "Continental 4on4off 12h",
+      operatingPattern: "24/7 continuous",
+      hoursPerShift: 12, shiftsPerDay: 2, workDaysPerYear: 365,
+      reason: "24/7 coverage needs two 12-hour shifts every day of the year.",
+      simultaneousSlots: 2,
+      minCrewToOperate: Math.max(4, 2 * Math.max(1, minOnSite) * 2),
+      coverageHoursPerDay: h, coverageDays: days,
+    };
+  }
+  // 24h Mon-Fri → 3-shift rotating
+  if (h >= 23.5 && days === "Mon-Fri") {
+    return {
+      patternName: "3-shift rotating",
+      shiftModel: "3-shift rotating 8h",
+      operatingPattern: "24/5 Mon-Fri",
+      hoursPerShift: 8, shiftsPerDay: 3, workDaysPerYear: 252,
+      reason: "24 hours weekday-only fits three 8-hour rotating shifts.",
+      simultaneousSlots: 3,
+      minCrewToOperate: Math.max(3, 3 * Math.max(1, minOnSite)),
+      coverageHoursPerDay: h, coverageDays: days,
+    };
+  }
+  // 14-24h any days → Continental
+  if (h >= 14) {
+    return {
+      patternName: "Continental 4-on / 4-off",
+      shiftModel: "Continental 4on4off 12h",
+      operatingPattern: "24/7 continuous",
+      hoursPerShift: 12, shiftsPerDay: 2, workDaysPerYear: wd,
+      reason: `${h.toFixed(1)}h/day across ${days} is most efficient on a 12-hour continental rota.`,
+      simultaneousSlots: 2,
+      minCrewToOperate: Math.max(4, 2 * Math.max(1, minOnSite) * 2),
+      coverageHoursPerDay: h, coverageDays: days,
+    };
+  }
+  // 12+ hours weekday → 2-shift 12h
+  if (h >= 12 && days === "Mon-Fri") {
+    return {
+      patternName: "Extended day / 2-shift 12h",
+      shiftModel: "2-shift early/late 8h",
+      operatingPattern: "Extended 07-19 Mon-Fri",
+      hoursPerShift: 12, shiftsPerDay: 1, workDaysPerYear: 252,
+      reason: `${h.toFixed(1)}h weekday coverage suits an extended 12h day or paired 12h shifts.`,
+      simultaneousSlots: 1,
+      minCrewToOperate: Math.max(1, minOnSite),
+      coverageHoursPerDay: h, coverageDays: days,
+    };
+  }
+  // Up to 12h Mon-Sat → 2-shift Mon-Sat
+  if (h <= 12 && days === "Mon-Sat") {
+    return {
+      patternName: "2-shift early/late · Mon–Sat",
+      shiftModel: "2-shift early/late 8h",
+      operatingPattern: "Mon-Sat 08-17",
+      hoursPerShift: 8, shiftsPerDay: 2, workDaysPerYear: 300,
+      reason: `${h.toFixed(1)}h × 6 days fits paired 8h early/late shifts.`,
+      simultaneousSlots: 2,
+      minCrewToOperate: Math.max(2, 2 * Math.max(1, minOnSite)),
+      coverageHoursPerDay: h, coverageDays: days,
+    };
+  }
+  // 10-14h Mon-Fri → 2-shift early/late
+  if (h > 10 && h < 12 && days === "Mon-Fri") {
+    return {
+      patternName: "Early / Late 2-shift",
+      shiftModel: "2-shift early/late 8h",
+      operatingPattern: "Extended 07-19 Mon-Fri",
+      hoursPerShift: 8, shiftsPerDay: 2, workDaysPerYear: 252,
+      reason: `${h.toFixed(1)}h weekday coverage is best served by overlapping early and late 8h shifts.`,
+      simultaneousSlots: 2,
+      minCrewToOperate: Math.max(2, 2 * Math.max(1, minOnSite)),
+      coverageHoursPerDay: h, coverageDays: days,
+    };
+  }
+  // Default: up to 10h Mon-Fri → day work
+  return {
+    patternName: "Day work — single shift",
+    shiftModel: "Day work",
+    operatingPattern: days === "Mon-Sat" ? "Mon-Sat 08-17" : "Mon-Fri 08-17",
+    hoursPerShift: Math.max(8, Math.min(10, Math.ceil(h))),
+    shiftsPerDay: 1,
+    workDaysPerYear: wd,
+    reason: `${h.toFixed(1)}h/day × ${days} fits a standard single day-work shift.`,
+    simultaneousSlots: 1,
+    minCrewToOperate: Math.max(1, minOnSite),
+    coverageHoursPerDay: h, coverageDays: days,
+  };
+}
+
+export function minViableCrew(rec: ShiftRecommendation, availability: number): number {
+  // people needed per role to staff every slot allowing for absence
+  const base = rec.simultaneousSlots * Math.max(1, 1); // 1 person per slot baseline
+  return Math.ceil(base / Math.max(0.0001, availability));
+}
