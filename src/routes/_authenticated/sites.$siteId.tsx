@@ -27,7 +27,6 @@ import {
 import { PageHeader, Metric, SectionTitle, Pill } from "@/components/samp-ui";
 
 const SHIFT_MODELS = ["Day work","Continental 4on4off 12h","3-shift rotating 8h","2-shift early/late 8h","Custom"] as const;
-const SHIFT_MODELS = ["Day work","Continental 4on4off 12h","3-shift rotating 8h","2-shift early/late 8h","Custom"] as const;
 const CONTRACT_TYPES = ["TFM","Hard FM","Soft FM","Self-delivered"] as const;
 
 export const Route = createFileRoute("/_authenticated/sites/$siteId")({
