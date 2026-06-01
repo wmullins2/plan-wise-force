@@ -13,13 +13,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ArrowLeft, Upload, Trash2, AlertTriangle, Save, Download, X, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  WRENCH_FACTORS, DISCIPLINES, WO_TYPES, FREQUENCIES, OPERATING_PATTERN_DEFAULTS,
+  WRENCH_FACTORS, DISCIPLINES, WO_TYPES, FREQUENCIES,
   totalLossPerShift, wrenchTimePct, annualHoursPerEmployee, productiveHoursPerEmployee,
   inHouseHoursPerYear, vendorHoursPerYear, totalFTE, headcountAt100, shiftSlots, isShiftTeam,
   availabilityRatio, disciplineBreakdown, tradeGroupRollup, sensitivityTable,
   statutorySplit, woTypeSplit, sfg20Comparison, taskHoursPerYear, coverAdjusted, fmt,
-  type Site, type PMTask, type Discipline, type WOType,
+  recommendShiftPattern, coverageHoursPerDay, minViableCrew, COVERAGE_DAYS,
+  type Site, type PMTask, type Discipline, type WOType, type CoverageDays, type ShiftRecommendation,
 } from "@/lib/calc";
 import { PageHeader, Metric, SectionTitle, Pill } from "@/components/samp-ui";
 
