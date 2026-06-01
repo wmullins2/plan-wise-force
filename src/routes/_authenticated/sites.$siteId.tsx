@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Upload, Plus, Trash2, AlertTriangle, Save } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, AlertTriangle, Save, Download, X, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import {
@@ -247,22 +247,160 @@ function WrenchTab({ site, canWrite }: { site: Site; canWrite: boolean }) {
   );
 }
 
-/* ---------------- PM SCHEDULE TAB ---------------- */
+/* ---------------- PM SCHEDULE TAB (upload-only) ---------------- */
+
+// Canonical field keys we map to
+type FieldKey =
+  | "task_name" | "discipline" | "wo_type" | "in_house" | "statutory"
+  | "num_assets" | "mins_per_asset" | "periodicity_multiplier"
+  | "mins_per_year" | "hours_per_year" | "sfg20_code" | "notes" | "ignore";
+
+const FIELD_LABELS: Record<FieldKey, string> = {
+  task_name: "Task name", discipline: "Discipline", wo_type: "WO type",
+  in_house: "In-house / Vendor", statutory: "Statutory flag",
+  num_assets: "Number of assets", mins_per_asset: "Minutes per asset",
+  periodicity_multiplier: "Periodicity (times/yr)", mins_per_year: "Minutes per year",
+  hours_per_year: "Hours per year", sfg20_code: "SFG20 code", notes: "Notes / comments",
+  ignore: "— Ignore —",
+};
+
+const norm = (s: any) => (s ?? "").toString().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// Synonym → canonical field
+const FIELD_SYNONYMS: Record<FieldKey, string[]> = {
+  task_name: ["taskname","task","name","description","wodescription","schedule","schedulename","workorder","workordername","activity","ppmtask"],
+  discipline: ["discipline","trade","craft","category","assettype","skill","tradegroup"],
+  wo_type: ["wotype","worktype","type","tasktype","ordertype","jobtype","maintenancetype"],
+  in_house: ["inhouse","inhousevendor","source","resource","provider","contractor","supplier","executedby","resourcetype"],
+  statutory: ["statutory","stat","compliance","mandatory","legal","sfgcompliance"],
+  num_assets: ["assets","numberofassets","numassets","quantity","qty","assetcount","count","units"],
+  mins_per_asset: ["minutesperasset","minsperasset","durationmins","duration","minutes","mins","time","timeminutes","timeperasset","minutespertask"],
+  periodicity_multiplier: ["periodicity","periodicitymultiplier","frequencyperyear","occurrencesperyear","timesperyear","frequency","recurrence","peryear","occurrences"],
+  mins_per_year: ["minutesperyear","minsperyear","annualminutes","totalminutes"],
+  hours_per_year: ["hoursperyear","hrsperyear","annualhours","totalhours","yearlyhours"],
+  sfg20_code: ["sfg20","sfg20code","sfgcode","sfg","sfgreference","reference","ref","code","sfg20ref"],
+  notes: ["comments","notes","remarks","memo","description2"],
+  ignore: [],
+};
+
+function autoMapHeaders(headers: string[]): Record<string, FieldKey> {
+  const map: Record<string, FieldKey> = {};
+  const used = new Set<FieldKey>();
+  for (const h of headers) {
+    const n = norm(h);
+    let best: FieldKey = "ignore";
+    for (const [field, syns] of Object.entries(FIELD_SYNONYMS) as [FieldKey, string[]][]) {
+      if (field === "ignore" || used.has(field)) continue;
+      if (syns.some(s => n === s || (n.length > 3 && (n.includes(s) || s.includes(n))))) {
+        best = field; break;
+      }
+    }
+    map[h] = best;
+    if (best !== "ignore") used.add(best);
+  }
+  return map;
+}
+
+const detectDiscipline = (val: any): Discipline => {
+  const v = (val ?? "").toString().toLowerCase();
+  if (v.includes("hvac") || v.includes("mech") || v.includes("air") || v.includes("chill")) return "HVAC";
+  if (v.includes("elec")) return "Electrical";
+  if (v.includes("plumb") || v.includes("water")) return "Plumbing";
+  if (v.includes("bms") || v.includes("control")) return "BMS";
+  if (v.includes("fabric") || v.includes("build") || v.includes("joiner")) return "Fabric";
+  if (v.includes("super")) return "Supervisor";
+  return "General";
+};
+const detectWO = (val: any): WOType => {
+  const v = (val ?? "").toString().toLowerCase();
+  if (v.includes("stat")) return "Statutory";
+  if (v.includes("insp")) return "Inspection";
+  if (v.includes("rec")) return "Recurring";
+  return "PM";
+};
+const detectInHouse = (val: any): boolean => {
+  if (val === undefined || val === null || val === "") return true;
+  const v = val.toString().toLowerCase();
+  if (/vendor|sub|contract|supplier|external|outsourc/.test(v)) return false;
+  return true;
+};
+const detectBool = (val: any): boolean => {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "number") return val !== 0;
+  const v = (val ?? "").toString().toLowerCase().trim();
+  return ["y","yes","true","1","stat","statutory","x","✓"].includes(v);
+};
+
+type ParsedRow = Partial<PMTask> & { _src?: string };
+
+function rowsToTasks(rows: any[], headerMap: Record<string, FieldKey>, sheetName: string): ParsedRow[] {
+  const out: ParsedRow[] = [];
+  for (const row of rows) {
+    const get = (field: FieldKey) => {
+      for (const [h, f] of Object.entries(headerMap)) {
+        if (f === field && row[h] !== undefined && row[h] !== "") return row[h];
+      }
+      return undefined;
+    };
+    const name = get("task_name");
+    if (!name) continue;
+    const numA = +(get("num_assets") ?? 1) || 1;
+    const minsA = +(get("mins_per_asset") ?? 0) || 0;
+    const period = +(get("periodicity_multiplier") ?? 1) || 1;
+    const minsYear = +(get("mins_per_year") ?? 0) || 0;
+    const hoursYearRaw = +(get("hours_per_year") ?? 0) || 0;
+    const hrs = minsYear > 0
+      ? minsYear / 60
+      : hoursYearRaw > 0
+        ? hoursYearRaw
+        : (numA * minsA * period) / 60;
+    const woVal = get("wo_type");
+    const statVal = get("statutory");
+    out.push({
+      task_name: name.toString().slice(0, 200),
+      discipline: detectDiscipline(get("discipline")),
+      wo_type: detectWO(woVal),
+      in_house: detectInHouse(get("in_house")),
+      statutory: statVal !== undefined ? detectBool(statVal) : detectWO(woVal) === "Statutory",
+      num_assets: numA,
+      mins_per_asset: minsA,
+      frequency: "Annual",
+      periodicity_multiplier: period,
+      hours_per_year: Math.round(hrs * 100) / 100,
+      sfg20_code: (() => { const s = get("sfg20_code"); return s ? s.toString().slice(0, 20) : null; })(),
+      notes: (() => { const s = get("notes"); return s ? s.toString().slice(0, 500) : null; })(),
+      _src: sheetName,
+    });
+  }
+  return out;
+}
+
+type ImportState = {
+  fileName: string;
+  sheets: { name: string; headers: string[]; rows: any[]; map: Record<string, FieldKey> }[];
+};
+
 function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrite: boolean }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [importState, setImportState] = useState<ImportState | null>(null);
+  const [filter, setFilter] = useState({ discipline: "all", wo: "all", source: "all", stat: "all" });
 
-  const addTask = useMutation({
+  const replaceTasks = useMutation({
     mutationFn: async (rows: Partial<PMTask>[]) => {
-      const payload = rows.map(r => ({ ...r, site_id: site.id }));
-      const { error } = await supabase.from("pm_tasks").insert(payload as any);
-      if (error) throw error;
+      const { error: delErr } = await supabase.from("pm_tasks").delete().eq("site_id", site.id);
+      if (delErr) throw delErr;
+      if (rows.length) {
+        const payload = rows.map(({ ...r }: any) => { delete r._src; return { ...r, site_id: site.id }; });
+        const { error } = await supabase.from("pm_tasks").insert(payload as any);
+        if (error) throw error;
+      }
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["site", site.id] });
-      toast.success(`${vars.length} task(s) added`);
-      setOpen(false);
+      toast.success(`Imported ${vars.length} task(s) — previous schedule replaced.`);
+      setImportState(null);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -275,71 +413,30 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
     onSuccess: () => qc.invalidateQueries({ queryKey: ["site", site.id] }),
   });
 
-  const onUpload = async (file: File) => {
+  const clearAll = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("pm_tasks").delete().eq("site_id", site.id);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["site", site.id] }); toast.success("All tasks cleared."); },
+  });
+
+  const onFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      toast.error("Only .xlsx files are accepted.");
+      return;
+    }
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
-      const norm = (s: string) => s.toString().toLowerCase().replace(/[^a-z0-9]/g, "");
-      const pick = (row: any, keys: string[]) => {
-        for (const k of Object.keys(row)) if (keys.includes(norm(k))) return row[k];
-        return undefined;
-      };
-
-      const detectDiscipline = (val: any): Discipline => {
-        const v = (val ?? "").toString().toLowerCase();
-        if (v.includes("hvac") || v.includes("mech") || v.includes("air")) return "HVAC";
-        if (v.includes("elec")) return "Electrical";
-        if (v.includes("plumb") || v.includes("water")) return "Plumbing";
-        if (v.includes("bms") || v.includes("control")) return "BMS";
-        if (v.includes("fabric") || v.includes("build")) return "Fabric";
-        if (v.includes("super")) return "Supervisor";
-        return "General";
-      };
-      const detectWO = (val: any): WOType => {
-        const v = (val ?? "").toString().toLowerCase();
-        if (v.includes("stat")) return "Statutory";
-        if (v.includes("insp")) return "Inspection";
-        if (v.includes("rec")) return "Recurring";
-        return "PM";
-      };
-
-      const parsed: Partial<PMTask>[] = rows.map(r => {
-        const name = pick(r, ["taskname","task","name","description","wodescription"]);
-        const inhouse = pick(r, ["inhouse","inhousevendor","resource","provider"]);
-        const wo = pick(r, ["wotype","worktype","wo","type"]);
-        const disc = pick(r, ["discipline","trade","craft"]);
-        const numA = +(pick(r, ["assets","numberofassets","numassets","quantity","qty"]) ?? 1);
-        const minsA = +(pick(r, ["minutesperasset","minsperasset","durationmins","minutes","mins"]) ?? 0);
-        const period = +(pick(r, ["periodicity","periodicitymultiplier","frequencyperyear","occurrencesperyear"]) ?? 1);
-        const minsYear = +(pick(r, ["minutesperyear","minsperyear"]) ?? 0);
-        const hoursYear = +(pick(r, ["hoursperyear","hrsperyear","annualhours"]) ?? 0);
-        const sfg = pick(r, ["sfg20","sfg20code","sfgcode"]);
-        const notes = pick(r, ["comments","notes","remarks"]);
-
-        const hrs = hoursYear > 0 ? hoursYear
-          : minsYear > 0 ? minsYear / 60
-          : (numA * minsA * period) / 60;
-
-        return {
-          task_name: (name ?? "Unnamed task").toString().slice(0, 200),
-          in_house: typeof inhouse === "string" ? !/vendor|sub|contract/i.test(inhouse) : true,
-          wo_type: detectWO(wo),
-          discipline: detectDiscipline(disc),
-          statutory: detectWO(wo) === "Statutory",
-          num_assets: numA || 1,
-          mins_per_asset: minsA || 0,
-          frequency: "Annual",
-          periodicity_multiplier: period || 1,
-          hours_per_year: hrs || 0,
-          sfg20_code: sfg ? sfg.toString().slice(0, 20) : null,
-          notes: notes ? notes.toString().slice(0, 500) : null,
-        };
-      }).filter(t => t.task_name);
-
-      if (!parsed.length) { toast.error("No rows detected in file"); return; }
-      addTask.mutate(parsed);
+      const sheets = wb.SheetNames.map(name => {
+        const ws = wb.Sheets[name];
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        const headers = rows.length ? Object.keys(rows[0]) : [];
+        return { name, headers, rows, map: autoMapHeaders(headers) };
+      }).filter(s => s.headers.length > 0);
+      if (!sheets.length) { toast.error("No data found in workbook."); return; }
+      setImportState({ fileName: file.name, sheets });
     } catch (e: any) {
       toast.error("Could not parse file: " + e.message);
     } finally {
@@ -347,33 +444,247 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
     }
   };
 
+  const parsedPreview = useMemo<ParsedRow[]>(() => {
+    if (!importState) return [];
+    return importState.sheets.flatMap(s => rowsToTasks(s.rows, s.map, s.name));
+  }, [importState]);
+
+  // unresolved required fields across all sheets
+  const unmappedRequired = useMemo(() => {
+    if (!importState) return [];
+    const required: FieldKey[] = ["task_name"];
+    const missing: { sheet: string; field: FieldKey }[] = [];
+    for (const s of importState.sheets) {
+      const present = new Set(Object.values(s.map));
+      for (const f of required) if (!present.has(f)) missing.push({ sheet: s.name, field: f });
+    }
+    return missing;
+  }, [importState]);
+
+  const filtered = useMemo(() => tasks.filter(t =>
+    (filter.discipline === "all" || t.discipline === filter.discipline) &&
+    (filter.wo === "all" || t.wo_type === filter.wo) &&
+    (filter.source === "all" || (filter.source === "in" ? t.in_house : !t.in_house)) &&
+    (filter.stat === "all" || (filter.stat === "yes" ? t.statutory : !t.statutory))
+  ), [tasks, filter]);
+
+  const exportXlsx = () => {
+    const rows = tasks.map(t => ({
+      "Task name": t.task_name, "Discipline": t.discipline, "WO type": t.wo_type,
+      "Source": t.in_house ? "In-house" : "Vendor", "Statutory": t.statutory ? "Yes" : "No",
+      "Assets": t.num_assets, "Mins / asset": t.mins_per_asset,
+      "Times / yr": t.periodicity_multiplier, "Hrs / yr": taskHoursPerYear(t),
+      "SFG20": t.sfg20_code ?? "", "Notes": t.notes ?? "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "PM Schedule");
+    XLSX.writeFile(wb, `${site.name.replace(/[^a-z0-9]+/gi,"_")}_PM_schedule.xlsx`);
+  };
+
+  // Summary stats
+  const summary = useMemo(() => {
+    const inHouse = parsedPreview.filter(t => t.in_house).reduce((a,t) => a + (t.hours_per_year ?? 0), 0);
+    const vendor = parsedPreview.filter(t => !t.in_house).reduce((a,t) => a + (t.hours_per_year ?? 0), 0);
+    const byDisc: Record<string, number> = {};
+    const byWo: Record<string, number> = {};
+    for (const t of parsedPreview) {
+      byDisc[t.discipline!] = (byDisc[t.discipline!] ?? 0) + (t.hours_per_year ?? 0);
+      byWo[t.wo_type!] = (byWo[t.wo_type!] ?? 0) + (t.hours_per_year ?? 0);
+    }
+    return { inHouse, vendor, byDisc, byWo };
+  }, [parsedPreview]);
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1">
           <h3 className="text-sm font-semibold">PM schedule</h3>
-          <p className="text-xs text-muted-foreground">{tasks.length} task(s) · {fmt.n(inHouseHoursPerYear(tasks))} in-house hrs/yr · {fmt.n(vendorHoursPerYear(tasks))} vendor hrs/yr</p>
+          <p className="text-xs text-muted-foreground">
+            {tasks.length} task(s) · {fmt.n(inHouseHoursPerYear(tasks))} in-house hrs/yr · {fmt.n(vendorHoursPerYear(tasks))} vendor hrs/yr
+          </p>
         </div>
-        {canWrite && (
-          <>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden"
-                   onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUpload(f); }} />
-            <Button variant="outline" className="gap-2" onClick={()=>fileRef.current?.click()}>
-              <Upload size={16}/> Upload .xlsx
-            </Button>
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild>
-                <Button className="gap-2"><Plus size={16}/> Add task</Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader><DialogTitle>Add PM task</DialogTitle></DialogHeader>
-                <TaskForm onSubmit={(t) => addTask.mutate([t])} loading={addTask.isPending} />
-              </DialogContent>
-            </Dialog>
-          </>
+        {tasks.length > 0 && (
+          <Button variant="outline" size="sm" className="gap-2" onClick={exportXlsx}>
+            <Download size={14}/> Export
+          </Button>
+        )}
+        {canWrite && tasks.length > 0 && (
+          <Button variant="outline" size="sm" className="gap-2 text-destructive hover:text-destructive"
+                  onClick={()=>{ if (confirm("Clear all tasks? This cannot be undone.")) clearAll.mutate(); }}>
+            <Trash2 size={14}/> Clear all
+          </Button>
         )}
       </div>
 
+      {/* Upload zone */}
+      {canWrite && (
+        <Card
+          className={`p-8 border-2 border-dashed transition-colors ${dragOver ? "border-primary bg-primary/5" : "border-border"}`}
+          onDragOver={(e)=>{ e.preventDefault(); setDragOver(true); }}
+          onDragLeave={()=>setDragOver(false)}
+          onDrop={(e)=>{ e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
+        >
+          <div className="flex flex-col items-center text-center gap-3">
+            <Upload size={28} className="text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Drop a CAFM PM schedule (.xlsx) here</p>
+              <p className="text-xs text-muted-foreground mt-1">All sheets in the workbook will be parsed. Column headers are auto-detected — uploading replaces the existing schedule.</p>
+            </div>
+            <input ref={fileRef} type="file" accept=".xlsx" className="hidden"
+                   onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onFile(f); }} />
+            <Button variant="outline" className="gap-2 mt-2" onClick={()=>fileRef.current?.click()}>
+              <FileSpreadsheet size={16}/> Browse files
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Import preview / mapping dialog */}
+      <Dialog open={!!importState} onOpenChange={(o)=>!o && setImportState(null)}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Review import — {importState?.fileName}</DialogTitle>
+          </DialogHeader>
+          {importState && (
+            <div className="space-y-5">
+              {/* Mapping section */}
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Auto-detected mapping for each sheet. Adjust any column whose meaning was missed.
+                </p>
+                {importState.sheets.map((s, si) => (
+                  <Card key={s.name} className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-sm font-semibold">{s.name}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{s.rows.length} rows · {s.headers.length} cols</div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-2">
+                      {s.headers.map(h => (
+                        <div key={h} className="grid grid-cols-[1fr_180px] items-center gap-2">
+                          <span className="text-xs font-mono truncate" title={h}>{h}</span>
+                          <Select value={s.map[h]} onValueChange={(v)=>{
+                            setImportState(prev => {
+                              if (!prev) return prev;
+                              const sheets = [...prev.sheets];
+                              sheets[si] = { ...sheets[si], map: { ...sheets[si].map, [h]: v as FieldKey } };
+                              return { ...prev, sheets };
+                            });
+                          }}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                            <SelectContent>
+                              {(Object.keys(FIELD_LABELS) as FieldKey[]).map(k => (
+                                <SelectItem key={k} value={k}>{FIELD_LABELS[k]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+
+              {unmappedRequired.length > 0 && (
+                <div className="flex items-start gap-2 p-3 rounded bg-warning/10 border border-warning/30 text-xs">
+                  <AlertTriangle size={14} className="text-warning mt-0.5"/>
+                  <div>
+                    Some sheets are missing a <strong>Task name</strong> column:
+                    {" "}{unmappedRequired.map(m => `${m.sheet}`).join(", ")}.
+                    Map one before importing or those rows will be skipped.
+                  </div>
+                </div>
+              )}
+
+              {/* Summary */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Metric label="Tasks parsed" value={fmt.n(parsedPreview.length)} accent/>
+                <Metric label="In-house hrs/yr" value={fmt.n(summary.inHouse)}/>
+                <Metric label="Vendor hrs/yr" value={fmt.n(summary.vendor)}/>
+                <Metric label="Total hrs/yr" value={fmt.n(summary.inHouse + summary.vendor)} accent/>
+              </div>
+              <div className="grid md:grid-cols-2 gap-3">
+                <Card className="p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">By discipline</div>
+                  {Object.entries(summary.byDisc).sort((a,b)=>b[1]-a[1]).map(([k,v]) => (
+                    <div key={k} className="flex justify-between text-xs py-0.5"><span>{k}</span><span className="text-mono">{fmt.n(v)} h</span></div>
+                  ))}
+                </Card>
+                <Card className="p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">By WO type</div>
+                  {Object.entries(summary.byWo).sort((a,b)=>b[1]-a[1]).map(([k,v]) => (
+                    <div key={k} className="flex justify-between text-xs py-0.5"><span>{k}</span><span className="text-mono">{fmt.n(v)} h</span></div>
+                  ))}
+                </Card>
+              </div>
+
+              {/* Preview table */}
+              <Card className="overflow-x-auto max-h-80 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 border-b border-border sticky top-0">
+                    <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="p-2">Task</th><th className="p-2">Disc</th><th className="p-2">WO</th>
+                      <th className="p-2">Src</th><th className="p-2">Stat</th>
+                      <th className="p-2 text-right">Assets</th><th className="p-2 text-right">Min/a</th>
+                      <th className="p-2 text-right">×/yr</th><th className="p-2 text-right">Hrs/yr</th>
+                      <th className="p-2">SFG20</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedPreview.slice(0, 200).map((t, i) => (
+                      <tr key={i} className="border-b border-border/30">
+                        <td className="p-2 max-w-[260px] truncate" title={t.task_name}>{t.task_name}</td>
+                        <td className="p-2">{t.discipline}</td>
+                        <td className="p-2">{t.wo_type}</td>
+                        <td className="p-2">{t.in_house ? "In" : "Vendor"}</td>
+                        <td className="p-2">{t.statutory ? "Y" : ""}</td>
+                        <td className="p-2 text-right text-mono">{t.num_assets}</td>
+                        <td className="p-2 text-right text-mono">{t.mins_per_asset}</td>
+                        <td className="p-2 text-right text-mono">{t.periodicity_multiplier}</td>
+                        <td className="p-2 text-right text-mono font-semibold">{fmt.n(t.hours_per_year ?? 0, 1)}</td>
+                        <td className="p-2 text-mono text-muted-foreground">{t.sfg20_code ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {parsedPreview.length > 200 && (
+                  <div className="p-2 text-center text-[10px] text-muted-foreground">+ {parsedPreview.length - 200} more rows (will be imported)</div>
+                )}
+              </Card>
+
+              <div className="flex justify-between items-center gap-3 pt-2 border-t border-border">
+                <p className="text-xs text-muted-foreground">
+                  Confirming will <strong>replace</strong> all {tasks.length} existing task(s) for this site.
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={()=>setImportState(null)} className="gap-2"><X size={14}/> Cancel</Button>
+                  <Button onClick={()=>replaceTasks.mutate(parsedPreview)} disabled={replaceTasks.isPending || parsedPreview.length === 0} className="gap-2">
+                    <Save size={14}/> {replaceTasks.isPending ? "Importing…" : `Confirm & import ${parsedPreview.length}`}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Filters */}
+      {tasks.length > 0 && (
+        <Card className="p-3 flex flex-wrap gap-2">
+          <FilterSelect label="Discipline" value={filter.discipline} onChange={v=>setFilter(f=>({...f, discipline: v}))}
+                        options={[["all","All"], ...DISCIPLINES.map(d=>[d,d] as [string,string])]}/>
+          <FilterSelect label="WO type" value={filter.wo} onChange={v=>setFilter(f=>({...f, wo: v}))}
+                        options={[["all","All"], ...WO_TYPES.map(d=>[d,d] as [string,string])]}/>
+          <FilterSelect label="Source" value={filter.source} onChange={v=>setFilter(f=>({...f, source: v}))}
+                        options={[["all","All"],["in","In-house"],["out","Vendor"]]}/>
+          <FilterSelect label="Statutory" value={filter.stat} onChange={v=>setFilter(f=>({...f, stat: v}))}
+                        options={[["all","All"],["yes","Yes"],["no","No"]]}/>
+          <div className="ml-auto text-[11px] text-muted-foreground self-center text-mono">{filtered.length} / {tasks.length}</div>
+        </Card>
+      )}
+
+      {/* Read-only task table */}
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 border-b border-border">
@@ -384,7 +695,7 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
               <th className="p-3">Source</th>
               <th className="p-3 text-right">Assets</th>
               <th className="p-3 text-right">Min/asset</th>
-              <th className="p-3 text-right">Freq×/yr</th>
+              <th className="p-3 text-right">×/yr</th>
               <th className="p-3 text-right">Hrs/yr</th>
               <th className="p-3">SFG20</th>
               {canWrite && <th className="p-3"></th>}
@@ -392,13 +703,15 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
           </thead>
           <tbody>
             {tasks.length === 0 && (
-              <tr><td colSpan={10} className="p-8 text-center text-muted-foreground text-sm">No tasks yet — add manually or upload a CAFM .xlsx.</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-muted-foreground text-sm">
+                No tasks yet — upload a CAFM .xlsx export to populate the schedule.
+              </td></tr>
             )}
-            {tasks.map(t => (
+            {filtered.map(t => (
               <tr key={t.id} className="border-b border-border/50 hover:bg-muted/20">
                 <td className="p-3">
                   {t.task_name}
-                  {t.statutory && <Pill tone="warning"><span className="ml-1.5">STAT</span></Pill>}
+                  {t.statutory && <span className="ml-2"><Pill tone="warning">STAT</Pill></span>}
                 </td>
                 <td className="p-3"><Pill>{t.discipline}</Pill></td>
                 <td className="p-3 text-xs">{t.wo_type}</td>
@@ -424,54 +737,20 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
   );
 }
 
-function TaskForm({ onSubmit, loading }: { onSubmit: (t: Partial<PMTask>) => void; loading: boolean }) {
-  const [t, setT] = useState<Partial<PMTask>>({
-    task_name: "", discipline: "General", wo_type: "PM", in_house: true, statutory: false,
-    num_assets: 1, mins_per_asset: 30, frequency: "Annual", periodicity_multiplier: 1, hours_per_year: 0,
-    sfg20_code: null, notes: null,
-  });
+function FilterSelect({ label, value, onChange, options }:{
+  label: string; value: string; onChange: (v: string) => void; options: [string,string][];
+}) {
   return (
-    <form onSubmit={e=>{ e.preventDefault(); const periodicity = FREQUENCIES[t.frequency!] ?? 1; onSubmit({ ...t, periodicity_multiplier: periodicity }); }} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2"><Label>Task name</Label><Input value={t.task_name} onChange={e=>setT({...t, task_name: e.target.value})} required/></div>
-        <div>
-          <Label>Discipline</Label>
-          <Select value={t.discipline!} onValueChange={v=>setT({...t, discipline: v as Discipline})}>
-            <SelectTrigger><SelectValue/></SelectTrigger>
-            <SelectContent>{DISCIPLINES.map(d=><SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>WO type</Label>
-          <Select value={t.wo_type!} onValueChange={v=>setT({...t, wo_type: v as WOType, statutory: v==="Statutory"})}>
-            <SelectTrigger><SelectValue/></SelectTrigger>
-            <SelectContent>{WO_TYPES.map(w=><SelectItem key={w} value={w}>{w}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Source</Label>
-          <Select value={t.in_house ? "in" : "out"} onValueChange={v=>setT({...t, in_house: v==="in"})}>
-            <SelectTrigger><SelectValue/></SelectTrigger>
-            <SelectContent><SelectItem value="in">In-house</SelectItem><SelectItem value="out">Vendor</SelectItem></SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Frequency</Label>
-          <Select value={t.frequency!} onValueChange={v=>setT({...t, frequency: v})}>
-            <SelectTrigger><SelectValue/></SelectTrigger>
-            <SelectContent>{Object.keys(FREQUENCIES).map(f=><SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div><Label>Number of assets</Label><Input type="number" className="font-mono" value={t.num_assets} onChange={e=>setT({...t, num_assets:+e.target.value})}/></div>
-        <div><Label>Minutes / asset</Label><Input type="number" className="font-mono" value={t.mins_per_asset} onChange={e=>setT({...t, mins_per_asset:+e.target.value})}/></div>
-        <div><Label>Total hrs/yr (optional)</Label><Input type="number" className="font-mono" value={t.hours_per_year} onChange={e=>setT({...t, hours_per_year:+e.target.value})}/></div>
-        <div><Label>SFG20 code</Label><Input value={t.sfg20_code ?? ""} onChange={e=>setT({...t, sfg20_code: e.target.value || null})}/></div>
-        <div className="col-span-2"><Label>Notes</Label><Input value={t.notes ?? ""} onChange={e=>setT({...t, notes: e.target.value || null})}/></div>
-      </div>
-      <Button type="submit" disabled={loading} className="w-full">{loading ? "Adding…" : "Add task"}</Button>
-    </form>
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-8 w-36 text-xs"><SelectValue/></SelectTrigger>
+        <SelectContent>{options.map(([v,l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+      </Select>
+    </div>
   );
 }
+
 
 /* ---------------- LABOUR LOADING TAB ---------------- */
 function LoadingTab({ site, tasks }: { site: Site; tasks: PMTask[] }) {
