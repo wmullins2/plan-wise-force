@@ -37,8 +37,8 @@ function UsersPage() {
     enabled: role === "admin",
   });
 
-  const m = (fn: any, success: string) => useMutation({
-    mutationFn: fn,
+  const m = (fn: (v: any) => Promise<any>, success: string) => useMutation({
+    mutationFn: fn as (v: any) => Promise<any>,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["users-admin"] }); toast.success(success); },
     onError: (e: any) => toast.error(e.message),
   });
