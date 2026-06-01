@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { PageHeader } from "./dashboard";
 import type { Site } from "@/lib/calc";
 
-export const Route = createFileRoute("/_authenticated/sites")({
+export const Route = createFileRoute("/_authenticated/sites/")({
   head: () => ({ meta: [{ title: "Sites — SAMP" }] }),
   component: SitesPage,
 });
