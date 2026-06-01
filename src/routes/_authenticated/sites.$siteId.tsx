@@ -589,7 +589,7 @@ function LoadingTab({ site, tasks }: { site: Site; tasks: PMTask[] }) {
             <Card key={g.group} className="p-5">
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold">{g.group}</h4>
-                <Pill primary>{fmt.pct(g.share, 0)}</Pill>
+                <Pill tone="primary">{fmt.pct(g.share, 0)}</Pill>
               </div>
               <div className="mt-3 font-mono text-3xl text-primary">{g.recommendedHeadcount}</div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Recommended headcount</div>
