@@ -1011,14 +1011,39 @@ function LoadingTab({ site, tasks }: { site: Site; tasks: PMTask[] }) {
             ))}
           </tbody>
         </table>
-        {isShiftTeam(site.shift_model) && (
-          <div className="rounded-md border border-warning/30 bg-warning/5 p-3 text-xs text-warning-foreground">
-            <strong className="text-warning">Why raw FTE of 1 isn't viable for a shift team:</strong>{" "}
-            A {site.shift_model} pattern needs {shiftSlots(site.shift_model)} engineers on shift at all times to maintain the min-on-site of {site.min_on_site}.
-            Once you add ~{fmt.pct(1 - availabilityRatio(site), 0)} absence cover (leave + sickness + training), the practical headcount sits at
-            roughly <strong className="text-mono">{Math.ceil(site.min_on_site * shiftSlots(site.shift_model) / availabilityRatio(site))}</strong> per trade — independent of workload.
-          </div>
-        )}
+        {(() => {
+          const slots = Math.max(1, site.concurrent_shifts);
+          const avail = availabilityRatio(site);
+          const perSlot = Math.ceil(Math.max(1, site.min_on_site) / Math.max(0.0001, avail));
+          const totalCrew = slots * perSlot;
+          const pmFTE = calc.fte;
+          const underStaffed = pmFTE < totalCrew - 0.05;
+          return (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Metric label="People per shift slot" value={String(perSlot)} sub="incl. absence cover" />
+                <Metric label="Concurrent slots" value={String(slots)} />
+                <Metric label="Min crew to operate" value={String(totalCrew)} accent sub="per trade, before workload" />
+                <Metric label="PM workload FTE" value={fmt.fte(pmFTE)} />
+              </div>
+              {underStaffed && (
+                <div className="rounded-md border border-warning/30 bg-warning/5 p-3 text-xs text-warning-foreground">
+                  <strong className="text-warning flex items-center gap-1"><AlertTriangle size={12}/> Workload below minimum viable crew:</strong>{" "}
+                  PM workload requires <strong className="text-mono">{fmt.fte(pmFTE)}</strong> FTE but a {site.shift_model} pattern
+                  requires a minimum of <strong className="text-mono">{totalCrew}</strong> people to operate safely with absence cover.
+                  Consider a lighter shift pattern, sharing crew across trades, or absorbing reactive scope to justify the headcount.
+                </div>
+              )}
+              {isShiftTeam(site.shift_model) && !underStaffed && (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  A {site.shift_model} pattern needs {slots} engineers on shift at all times to maintain min-on-site of {site.min_on_site}.
+                  After ~{fmt.pct(1 - avail, 0)} absence uplift, the practical crew is{" "}
+                  <strong className="text-mono text-foreground">{totalCrew}</strong> per trade — independent of workload.
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Card>
 
       {/* Statutory + WO type */}
