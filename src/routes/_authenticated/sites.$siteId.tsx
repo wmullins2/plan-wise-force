@@ -799,8 +799,8 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
                 </p>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={()=>setImportState(null)} className="gap-2"><X size={14}/> Cancel</Button>
-                  <Button onClick={()=>replaceTasks.mutate(parsedPreview)} disabled={replaceTasks.isPending || parsedPreview.length === 0} className="gap-2">
-                    <Save size={14}/> {replaceTasks.isPending ? "Importing…" : `Confirm & import ${parsedPreview.length}`}
+                  <Button onClick={()=>replaceTasks.mutate(parsedPreview)} disabled={replaceTasks.isPending || summary.validCount === 0} className="gap-2">
+                    <Save size={14}/> {replaceTasks.isPending ? "Importing…" : `Confirm & import ${summary.validCount}`}
                   </Button>
                 </div>
               </div>
