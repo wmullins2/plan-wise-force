@@ -51,7 +51,7 @@
 /* Dark industrial theme — only one mode */
 :root {
   --radius: 0.5rem;
-  --background: oklch(0.16 0.01 250);
+  --background: oklch(0 0 0);
   --foreground: oklch(0.95 0.005 250);
   --card: oklch(0.19 0.012 250);
   --card-foreground: oklch(0.95 0.005 250);
