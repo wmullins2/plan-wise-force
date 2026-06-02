@@ -763,11 +763,12 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
                       <th className="p-2 text-right">Assets</th><th className="p-2 text-right">Min/a</th>
                       <th className="p-2 text-right">×/yr</th><th className="p-2 text-right">Hrs/yr</th>
                       <th className="p-2">SFG20</th>
+                      <th className="p-2">Flags</th>
                     </tr>
                   </thead>
                   <tbody>
                     {parsedPreview.slice(0, 200).map((t, i) => (
-                      <tr key={i} className="border-b border-border/30">
+                      <tr key={i} className={`border-b border-border/30 ${t._skip ? "opacity-50" : ""} ${t._flags?.length ? "bg-warning/5" : ""}`}>
                         <td className="p-2 max-w-[260px] truncate" title={t.task_name}>{t.task_name}</td>
                         <td className="p-2">{t.discipline}</td>
                         <td className="p-2">{t.wo_type}</td>
@@ -778,6 +779,11 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
                         <td className="p-2 text-right text-mono">{t.periodicity_multiplier}</td>
                         <td className="p-2 text-right text-mono font-semibold">{fmt.n(t.hours_per_year ?? 0, 1)}</td>
                         <td className="p-2 text-mono text-muted-foreground">{t.sfg20_code ?? ""}</td>
+                        <td className="p-2">
+                          {t._flags?.length ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-warning"><AlertTriangle size={10}/>{t._flags.join(" · ")}</span>
+                          ) : ""}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
