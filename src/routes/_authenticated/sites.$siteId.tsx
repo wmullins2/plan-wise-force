@@ -427,7 +427,15 @@ const detectBool = (val: any): boolean => {
   return ["y","yes","true","1","stat","statutory","x","✓"].includes(v);
 };
 
-type ParsedRow = Partial<PMTask> & { _src?: string };
+type ParsedRow = Partial<PMTask> & { _src?: string; _flags?: string[]; _skip?: boolean };
+
+// Map free-text frequency labels to expected times/year for mismatch detection.
+const FREQ_LABEL_TO_PERYEAR: Record<string, number> = {
+  daily: 365, weekly: 52, fortnightly: 26, biweekly: 26, monthly: 12,
+  quarterly: 4, "6monthly": 2, sixmonthly: 2, halfyearly: 2, biannual: 2,
+  annual: 1, annually: 1, yearly: 1, "2yearly": 0.5, biennial: 0.5,
+  "5yearly": 0.2, "5year": 0.2,
+};
 
 function rowsToTasks(rows: any[], headerMap: Record<string, FieldKey>, sheetName: string): ParsedRow[] {
   const out: ParsedRow[] = [];
@@ -438,11 +446,21 @@ function rowsToTasks(rows: any[], headerMap: Record<string, FieldKey>, sheetName
       }
       return undefined;
     };
-    const name = get("task_name");
-    if (!name) continue;
+    const rawName = get("task_name");
+    const flags: string[] = [];
+
+    if (!rawName) {
+      const hasAnyData = Object.values(row).some(v => v !== "" && v !== undefined && v !== null);
+      if (hasAnyData) {
+        out.push({ task_name: "(missing name)", _src: sheetName, _flags: ["Missing task name"], _skip: true });
+      }
+      continue;
+    }
+
     const numA = +(get("num_assets") ?? 1) || 1;
     const minsA = +(get("mins_per_asset") ?? 0) || 0;
-    const period = +(get("periodicity_multiplier") ?? 1) || 1;
+    const periodRaw = get("periodicity_multiplier");
+    const period = +(periodRaw ?? 1) || 1;
     const minsYear = +(get("mins_per_year") ?? 0) || 0;
     const hoursYearRaw = +(get("hours_per_year") ?? 0) || 0;
     const hrs = minsYear > 0
@@ -450,10 +468,23 @@ function rowsToTasks(rows: any[], headerMap: Record<string, FieldKey>, sheetName
       : hoursYearRaw > 0
         ? hoursYearRaw
         : (numA * minsA * period) / 60;
+
+    if (hrs <= 0) flags.push("Zero hrs/yr");
+    if (hrs > 500) flags.push("Check: >500 hrs/yr");
+
+    // Frequency label vs numeric mismatch
+    if (periodRaw !== undefined) {
+      const labelKey = periodRaw.toString().toLowerCase().replace(/[^a-z0-9]/g, "");
+      const expected = FREQ_LABEL_TO_PERYEAR[labelKey];
+      if (expected && expected !== period) {
+        flags.push(`Freq "${periodRaw}" ≠ ${period}/yr`);
+      }
+    }
+
     const woVal = get("wo_type");
     const statVal = get("statutory");
     out.push({
-      task_name: name.toString().slice(0, 200),
+      task_name: rawName.toString().slice(0, 200),
       discipline: detectDiscipline(get("discipline")),
       wo_type: detectWO(woVal),
       in_house: detectInHouse(get("in_house")),
@@ -466,6 +497,7 @@ function rowsToTasks(rows: any[], headerMap: Record<string, FieldKey>, sheetName
       sfg20_code: (() => { const s = get("sfg20_code"); return s ? s.toString().slice(0, 20) : null; })(),
       notes: (() => { const s = get("notes"); return s ? s.toString().slice(0, 500) : null; })(),
       _src: sheetName,
+      _flags: flags.length ? flags : undefined,
     });
   }
   return out;
