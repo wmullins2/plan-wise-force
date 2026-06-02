@@ -520,7 +520,9 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
       const { error: delErr } = await supabase.from("pm_tasks").delete().eq("site_id", site.id);
       if (delErr) throw delErr;
       if (rows.length) {
-        const payload = rows.map(({ ...r }: any) => { delete r._src; return { ...r, site_id: site.id }; });
+        const payload = rows
+          .filter((r: any) => !r._skip)
+          .map(({ ...r }: any) => { delete r._src; delete r._flags; delete r._skip; return { ...r, site_id: site.id }; });
         const { error } = await supabase.from("pm_tasks").insert(payload as any);
         if (error) throw error;
       }
