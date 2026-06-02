@@ -612,15 +612,18 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
 
   // Summary stats
   const summary = useMemo(() => {
-    const inHouse = parsedPreview.filter(t => t.in_house).reduce((a,t) => a + (t.hours_per_year ?? 0), 0);
-    const vendor = parsedPreview.filter(t => !t.in_house).reduce((a,t) => a + (t.hours_per_year ?? 0), 0);
+    const valid = parsedPreview.filter(t => !t._skip);
+    const inHouse = valid.filter(t => t.in_house).reduce((a,t) => a + (t.hours_per_year ?? 0), 0);
+    const vendor = valid.filter(t => !t.in_house).reduce((a,t) => a + (t.hours_per_year ?? 0), 0);
     const byDisc: Record<string, number> = {};
     const byWo: Record<string, number> = {};
-    for (const t of parsedPreview) {
+    for (const t of valid) {
       byDisc[t.discipline!] = (byDisc[t.discipline!] ?? 0) + (t.hours_per_year ?? 0);
       byWo[t.wo_type!] = (byWo[t.wo_type!] ?? 0) + (t.hours_per_year ?? 0);
     }
-    return { inHouse, vendor, byDisc, byWo };
+    const flagged = parsedPreview.filter(t => t._flags && t._flags.length).length;
+    const skipped = parsedPreview.filter(t => t._skip).length;
+    return { inHouse, vendor, byDisc, byWo, flagged, skipped, validCount: valid.length };
   }, [parsedPreview]);
 
   return (
