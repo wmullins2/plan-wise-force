@@ -731,11 +731,12 @@ function PMTab({ site, tasks, canWrite }: { site: Site; tasks: PMTask[]; canWrit
               )}
 
               {/* Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Metric label="Tasks parsed" value={fmt.n(parsedPreview.length)} accent/>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <Metric label="Tasks to import" value={fmt.n(summary.validCount)} accent/>
                 <Metric label="In-house hrs/yr" value={fmt.n(summary.inHouse)}/>
                 <Metric label="Vendor hrs/yr" value={fmt.n(summary.vendor)}/>
                 <Metric label="Total hrs/yr" value={fmt.n(summary.inHouse + summary.vendor)} accent/>
+                <Metric label="Flagged rows" value={fmt.n(summary.flagged)} sub={summary.skipped ? `${summary.skipped} skipped` : undefined}/>
               </div>
               <div className="grid md:grid-cols-2 gap-3">
                 <Card className="p-4">
