@@ -58,7 +58,7 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background bg-grid px-4">
+    <div className="min-h-screen flex items-center justify-center bg-background bg-grid px-4 text-slate-50">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="inline-flex items-baseline gap-2">
