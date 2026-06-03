@@ -66,7 +66,7 @@ function UsersPage() {
       } />
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading users…</div>}
-      {error && <div className="text-sm text-destructive">{(error as Error).message}</div>}
+      {error && <div className="text-sm text-destructive">Failed to load users. Please refresh.</div>}
 
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
