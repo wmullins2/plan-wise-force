@@ -370,7 +370,7 @@ export function recommendShiftPattern(
       hoursPerShift: 12, shiftsPerDay: 2, workDaysPerYear: 365,
       reason: "24/7 coverage needs two 12-hour shifts every day of the year.",
       simultaneousSlots: 2,
-      minCrewToOperate: Math.max(4, 2 * Math.max(1, minOnSite) * 2),
+      minCrewToOperate: Math.max(4, 2 * Math.max(1, minOnSite)),
       coverageHoursPerDay: h, coverageDays: days,
     };
   }
