@@ -321,8 +321,8 @@ export type CoverageDays = "Mon-Fri" | "Mon-Sat" | "Mon-Sun" | "24h";
 export const COVERAGE_DAYS: CoverageDays[] = ["Mon-Fri", "Mon-Sat", "Mon-Sun", "24h"];
 
 export const COVERAGE_DAY_DEFAULTS: Record<CoverageDays, { daysPerWeek: number; workDaysPerYear: number }> = {
-  "Mon-Fri": { daysPerWeek: 5, workDaysPerYear: 252 },
-  "Mon-Sat": { daysPerWeek: 6, workDaysPerYear: 300 },
+  "Mon-Fri": { daysPerWeek: 5, workDaysPerYear: 260 },
+  "Mon-Sat": { daysPerWeek: 6, workDaysPerYear: 312 },
   "Mon-Sun": { daysPerWeek: 7, workDaysPerYear: 365 },
   "24h":     { daysPerWeek: 7, workDaysPerYear: 365 },
 };
