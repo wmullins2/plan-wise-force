@@ -396,7 +396,7 @@ export function recommendShiftPattern(
       hoursPerShift: 12, shiftsPerDay: 2, workDaysPerYear: wd,
       reason: `${h.toFixed(1)}h/day across ${days} is most efficient on a 12-hour continental rota.`,
       simultaneousSlots: 2,
-      minCrewToOperate: Math.max(4, 2 * Math.max(1, minOnSite) * 2),
+      minCrewToOperate: Math.max(4, 2 * Math.max(1, minOnSite)),
       coverageHoursPerDay: h, coverageDays: days,
     };
   }
