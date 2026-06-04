@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/use-auth";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/_authenticated")({
+  ssr: false,
   component: AuthGate,
 });
 
