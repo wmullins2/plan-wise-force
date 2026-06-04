@@ -39,7 +39,7 @@ export const OPERATING_PATTERN_DEFAULTS: Record<OperatingPattern, { hoursPerShif
   "Mon-Sat 08-17":            { hoursPerShift: 9,  concurrentShifts: 1, workDays: 312 },
   "Extended 07-19 Mon-Fri":   { hoursPerShift: 12, concurrentShifts: 1, workDays: 252 },
   "24/7 continuous":          { hoursPerShift: 12, concurrentShifts: 2, workDays: 365 },
-  "24/5 Mon-Fri":             { hoursPerShift: 8,  concurrentShifts: 3, workDays: 252 },
+  "24/5 Mon-Fri":             { hoursPerShift: 8,  concurrentShifts: 3, workDays: 260 },
   "Custom":                   { hoursPerShift: 8,  concurrentShifts: 1, workDays: 252 },
 };
 
