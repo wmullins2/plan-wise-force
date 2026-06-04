@@ -35,8 +35,8 @@ export const SFG20_BENCHMARKS: Record<string, number> = {
 };
 
 export const OPERATING_PATTERN_DEFAULTS: Record<OperatingPattern, { hoursPerShift: number; concurrentShifts: number; workDays: number }> = {
-  "Mon-Fri 08-17":            { hoursPerShift: 9,  concurrentShifts: 1, workDays: 252 },
-  "Mon-Sat 08-17":            { hoursPerShift: 9,  concurrentShifts: 1, workDays: 300 },
+  "Mon-Fri 08-17":            { hoursPerShift: 9,  concurrentShifts: 1, workDays: 260 },
+  "Mon-Sat 08-17":            { hoursPerShift: 9,  concurrentShifts: 1, workDays: 312 },
   "Extended 07-19 Mon-Fri":   { hoursPerShift: 12, concurrentShifts: 1, workDays: 252 },
   "24/7 continuous":          { hoursPerShift: 12, concurrentShifts: 2, workDays: 365 },
   "24/5 Mon-Fri":             { hoursPerShift: 8,  concurrentShifts: 3, workDays: 252 },
@@ -321,8 +321,8 @@ export type CoverageDays = "Mon-Fri" | "Mon-Sat" | "Mon-Sun" | "24h";
 export const COVERAGE_DAYS: CoverageDays[] = ["Mon-Fri", "Mon-Sat", "Mon-Sun", "24h"];
 
 export const COVERAGE_DAY_DEFAULTS: Record<CoverageDays, { daysPerWeek: number; workDaysPerYear: number }> = {
-  "Mon-Fri": { daysPerWeek: 5, workDaysPerYear: 252 },
-  "Mon-Sat": { daysPerWeek: 6, workDaysPerYear: 300 },
+  "Mon-Fri": { daysPerWeek: 5, workDaysPerYear: 260 },
+  "Mon-Sat": { daysPerWeek: 6, workDaysPerYear: 312 },
   "Mon-Sun": { daysPerWeek: 7, workDaysPerYear: 365 },
   "24h":     { daysPerWeek: 7, workDaysPerYear: 365 },
 };
